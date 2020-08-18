@@ -10,12 +10,8 @@ pip install discord
 
 ### Running
 
-- Download Discord messages using [Discord History Tracker](https://dht.chylex.com/).
-
-- Run once with default settings.
-
 ```
-python quothbot.py dht.txt
+python quothbot.py [config.json]
 ```
 
-- Edit config.txt to change settings.
+A config file will be created the first time QuothBot is run. Your bot token must be pasted into the token field.

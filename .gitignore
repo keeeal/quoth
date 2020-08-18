@@ -1,5 +1,5 @@
-
-config.txt
+.vscode
+*.json
 *.txt
 
 # Byte-compiled / optimized / DLL files
