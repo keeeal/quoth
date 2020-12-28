@@ -1,7 +1,7 @@
 
-import os, asyncio, json
+import os, asyncio
 from itertools import chain
-from datetime import date
+from configparser import ConfigParser
 from random import choice
 
 import discord
@@ -9,7 +9,7 @@ import discord
 data = None
 
 
-# return a list of messages
+# return all messages from a guild
 async def get_messages(guild):
     return list(chain(*await asyncio.gather(*map(
         lambda c: c.history(limit=None).flatten(),
@@ -24,28 +24,40 @@ async def get_data(client):
     ))
 
 
+def embed_message(message):
+    embed = discord.Embed(
+        description=message.content,
+        timestamp=message.created_at
+    )
+    embed.set_author(
+        name=message.author.display_name,
+        icon_url=message.author.avatar_url
+    )
+
+    # if attachments then choose one
+    if message.attachments:
+        embed.set_image(url=choice(message.attachments).url)
+
+    return embed
+
+
 def main(config_file):
 
     # load config file or create it
+    config = ConfigParser()
     if os.path.isfile(config_file):
-        with open(config_file) as f:
-            config = json.load(f)
-        config['birthdays'] = {k: date.fromisoformat(v)
-            for k, v in config['birthdays'].items()}
+        config.read(config_file)
     else:
-        config = {
+        config['quothbot'] = {
             'token': '',
             'banlist': ['QuothBot'],
-            'birthdays': {},
         }
         with open(config_file, 'w') as f:
-            json.dump(config, f, indent=2)
+            config.write(f)
 
     # check for auth token
-    if not config['token']:
-        print('Error: Token not found.')
-        print('Copy bot token into "{}"'.format(config_file))
-        return
+    if not config['quothbot']['token']:
+        raise discord.LoginFailure(f'Empty token in "{config_file}"')
 
     # create client
     client = discord.Client()
@@ -63,65 +75,30 @@ def main(config_file):
     @client.event
     async def on_reaction_add(reaction, user):
         channel = reaction.message.channel
-        if reaction.emoji == '🐦':
+        if reaction.emoji != '🐦':
+            return
 
-            # report no data
-            if not data:
-                msg = "I can't quoth right now, I'm reading messages."
-                embed = discord.Embed(description=msg)
-                await channel.send(embed=embed)
-                return
-
-            # choose a message
-            # TODO: change data structure to make this more efficient
-            for sample in range(1000):
-                message = choice(data[channel.guild])
-                name = message.author.name
-
-                # respect banlist
-                if name in config['banlist']:
-                    continue
-
-                # check for birthdays
-                for key, value in config['birthdays'].items():
-                    value = date(date.today().year, value.month, value.day)
-                    if value == date.today():
-                        if name != key:
-                            continue
-
-                break
-            else:
-                msg = "I couldn't find a message."
-                embed = discord.Embed(description=msg)
-                await channel.send(embed=embed)
-                return
-
-            # get author nickname and avatar
-            icon_url = message.author.default_avatar_url
-            if isinstance(message.author, discord.Member):
-                icon_url = message.author.avatar_url
-                if message.author.nick:
-                    name = message.author.nick
-
-            # embed with author and timestamp
-            embed = discord.Embed(
-                description=message.content, timestamp=message.created_at)
-            embed.set_author(name=name, icon_url=icon_url)
-
-            # if attachments then choose one
-            if message.attachments:
-                embed.set_image(url=choice(message.attachments).url)
-
-            # send to reaction channel
+        # report no data
+        if not data:
+            content = "I can't quoth right now, I'm reading messages."
+            embed = discord.Embed(description=content)
             await channel.send(embed=embed)
+            return
+
+        # filter messages
+        banned = lambda m: m.author.name in config['quothbot']['banlist']
+        messages = filter(lambda m: not banned(m), data[channel.guild])
+
+        # send random message
+        await channel.send(embed=embed_message(choice(list(messages))))
 
 
     # start bot
-    client.run(config['token'])
+    client.run(config['quothbot']['token'])
 
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config-file', '-c', default='config.json')
+    parser.add_argument('--config-file', '-c', default='config.ini')
     main(**vars(parser.parse_args()))
