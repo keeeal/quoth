@@ -1,4 +1,5 @@
 
+from asyncio.tasks import gather
 import os, json
 from configparser import ConfigParser
 from datetime import datetime
@@ -38,45 +39,29 @@ class Atomic:
 
 class QuothData():
     def __init__(self):
-        self.guilds = {}
+        self.data = {}
+        self.comms = {}
 
     def update(self, message):
         guild_id = message.guild.id
 
-        if guild_id not in self.guilds:
-            self.guilds[guild_id] = Atomic({})
+        if guild_id not in self.data:
+            self.data[guild_id] = Atomic({})
 
-        with self.guilds[guild_id].lock:
-            self.guilds[guild_id].load[message.id] = get_message(message)
+        with self.data[guild_id].lock:
+            self.data[guild_id].load[message.id] = get_message(message)
 
     def get_random(self, guild_id, valid=None):
-        if guild_id not in self.guilds:
+        if guild_id not in self.data:
             return None
 
-        with self.guilds[guild_id].lock:
-            messages = list(filter(valid, self.guilds[guild_id].load.values()))
+        with self.data[guild_id].lock:
+            messages = list(filter(valid, self.data[guild_id].load.values()))
 
         if not messages:
             return None
 
         return choice(messages)
-
-    def to_disk(self, path):
-        if not os.path.isdir(path):
-            os.mkdir(path)
-
-        for guild_id in self.guilds:
-            with open(path / f'{guild_id}.json', 'w') as f:
-                with self.guilds[guild_id].lock:
-                    json.dump(self.guilds[guild_id].load, f)
-
-    def from_disk(self, path):
-        for file in os.listdir(path):
-            with open(path / file) as f:
-                messages = json.load(f)
-
-            guild_id = int(Path(file).stem)
-            self.guilds[guild_id] = Atomic(messages)
 
 
 def get_message(message):
@@ -91,7 +76,7 @@ def get_message(message):
         author = DotDict(
             name = message.author.name,
             display_name = message.author.display_name,
-            avatar_url = message.author.avatar_url,
+            avatar_url = str(message.author.avatar_url),
         ),
     )
 
@@ -114,7 +99,32 @@ def embed_message(message):
     return embed
 
 
+def media_posted(message, quoth):
+    payload = {
+        'eventType': 'media_posted',
+        'tags': ['quoth'],
+        'uri': message.jump_url,
+        'description': message.content.replace('```', ''),
+        'messageId': str(quoth.id),
+        'channelId': str(quoth.channel.id),
+    }
+
+    return f'```json\n{json.dumps(payload, indent=2)}```'
+
+
 DATA = QuothData()
+
+
+async def read_channel(channel):
+    try:
+        async for message in channel.history(limit=None):
+            DATA.update(message)
+    except discord.errors.Forbidden:
+        pass
+
+
+async def read_guild(guild):
+    await gather(*map(read_channel, guild.text_channels))
 
 
 def main(config_file, data_dir):
@@ -136,12 +146,6 @@ def main(config_file, data_dir):
     if not config['quothbot']['token']:
         raise discord.LoginFailure(f'No token in "{config_file}"')
 
-    # load data from directory or create one
-    if os.path.isdir(data_dir):
-        DATA.from_disk(data_dir)
-    else:
-        os.mkdir(data_dir)
-
     # create client
     intents = discord.Intents.default()
     intents.members = True
@@ -150,18 +154,7 @@ def main(config_file, data_dir):
     @client.event
     async def on_ready():
         global DATA
-
-        # update data
-        for guild in client.guilds:
-            for channel in guild.text_channels:
-                try:
-                    async for message in channel.history(limit=None):
-                        DATA.update(message)
-                except discord.errors.Forbidden:
-                    pass
-
-        # save data
-        DATA.to_disk(data_dir)
+        await gather(*map(read_guild, client.guilds))
 
     @client.event
     async def on_message(message):
@@ -173,13 +166,13 @@ def main(config_file, data_dir):
         or 'QUOTH' in ''.join(filter(str.isupper, content)):
             await message.add_reaction('🤔')
 
-        # # process commands
-        # prefix = '🐦'
-        # if content.startswith(prefix):
-        #     command, *args = content[len(prefix):].strip().split()
+        # process commands
+        prefix = '🐦'
+        if content.startswith(prefix):
+            command, *args = content[len(prefix):].strip().split()
 
-        #     if command ==  'comms':
-        #         comms_channel_id = args[0]
+            if command ==  'comms':
+                DATA.comms[message.guild.id] = int(args[0])
 
     @client.event
     async def on_raw_reaction_add(event):
@@ -195,7 +188,12 @@ def main(config_file, data_dir):
 
         # send message
         channel = client.get_channel(event.channel_id)
-        await channel.send(embed = embed_message(message))
+        quoth = await channel.send(embed = embed_message(message))
+
+        # notify comms
+        if event.guild_id in DATA.comms:
+            comms_channel = client.get_channel(DATA.comms[event.guild_id])
+            await comms_channel.send(media_posted(message, quoth))
 
     # start bot
     client.run(config['quothbot']['token'])
