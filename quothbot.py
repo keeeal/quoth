@@ -1,131 +1,210 @@
 
-import os, configparser
-from asyncio import gather
-from itertools import chain
+import os, json
+from configparser import ConfigParser
+from datetime import datetime
+from pathlib import Path
 from random import choice
+from threading import Lock
 
 import discord
 
-data = None
+
+class DotDict(dict):
+    __getattr__ = dict.__getitem__
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__
 
 
-# return all messages from a channel
-async def get_history(channel):
-    try:
-        return await channel.history(limit=None).flatten()
-    except discord.errors.Forbidden:
-        return []
+class Atomic:
+    def __init__(self, value=None):
+        self.lock = Lock()
+        self._load = value
+        self.exception = Exception('Acquire lock before accessing load.')
+
+    @property
+    def load(self):
+        if not self.lock.locked():
+            raise self.exception
+
+        return self._load
+
+    @load.setter
+    def load(self, value):
+        if not self.lock.locked():
+            raise self.exception
+
+        self._load = value
 
 
-# return all messages from a guild
-async def get_messages(guild):
-    return list(chain(*await gather(*map(get_history, guild.text_channels))))
+class QuothData():
+    def __init__(self):
+        self.guilds = {}
+
+    def update(self, message):
+        guild_id = message.guild.id
+
+        if guild_id not in self.guilds:
+            self.guilds[guild_id] = Atomic({})
+
+        with self.guilds[guild_id].lock:
+            self.guilds[guild_id].load[message.id] = get_message(message)
+
+    def get_random(self, guild_id, valid=None):
+        if guild_id not in self.guilds:
+            return None
+
+        with self.guilds[guild_id].lock:
+            messages = list(filter(valid, self.guilds[guild_id].load.values()))
+
+        if not messages:
+            return None
+
+        return choice(messages)
+
+    def to_disk(self, path):
+        if not os.path.isdir(path):
+            os.mkdir(path)
+
+        for guild_id in self.guilds:
+            with open(path / f'{guild_id}.json', 'w') as f:
+                with self.guilds[guild_id].lock:
+                    json.dump(self.guilds[guild_id].load, f)
+
+    def from_disk(self, path):
+        for file in os.listdir(path):
+            with open(path / file) as f:
+                messages = json.load(f)
+
+            guild_id = int(Path(file).stem)
+            self.guilds[guild_id] = Atomic(messages)
 
 
-# return a dictionary of guild: messages
-async def get_data(client):
-    return dict(zip(client.guilds, await gather(*map(get_messages, client.guilds))))
+def get_message(message):
+    return DotDict(
+        content = message.content,
+        jump_url = message.jump_url,
+        created_at = message.created_at.isoformat(),
+        attachments = [
+            DotDict(url = a.url)
+            for a in message.attachments
+        ],
+        author = DotDict(
+            name = message.author.name,
+            display_name = message.author.display_name,
+            avatar_url = message.author.avatar_url,
+        ),
+    )
 
 
 # return a message with author and timestamp
 def embed_message(message):
     embed = discord.Embed(
-        description=message.content,
-        timestamp=message.created_at,
-    )
-    embed.set_author(
-        name=message.author.display_name,
-        icon_url=message.author.avatar_url,
-        url=message.jump_url,
+        description = message.content,
+        timestamp = datetime.fromisoformat(message.created_at),
+    ).set_author(
+        name = message.author.display_name,
+        icon_url = message.author.avatar_url,
+        url = message.jump_url,
     )
 
     # if attachments then choose one
     if message.attachments:
-        embed.set_image(url=choice(message.attachments).url)
+        embed.set_image(url = choice(message.attachments).url)
 
     return embed
 
 
-def main(config_file):
+DATA = QuothData()
 
-    # load config file or create it
-    config = configparser.ConfigParser()
+
+def main(config_file, data_dir):
+    config = ConfigParser()
+
+    # load config from file or create one
     if os.path.isfile(config_file):
         config.read(config_file)
     else:
-        config["quothbot"] = {
-            "token": "",
-            "banlist": ["QuothBot"],
+        config['quothbot'] = {
+            'token': '',
+            'banlist': ['QuothBot'],
         }
-        with open(config_file, "w") as f:
+
+        with open(config_file, 'w') as f:
             config.write(f)
 
     # check for auth token
-    if not config["quothbot"]["token"]:
+    if not config['quothbot']['token']:
         raise discord.LoginFailure(f'No token in "{config_file}"')
+
+    # load data from directory or create one
+    if os.path.isdir(data_dir):
+        DATA.from_disk(data_dir)
+    else:
+        os.mkdir(data_dir)
 
     # create client
     intents = discord.Intents.default()
     intents.members = True
-    client = discord.Client(intents=intents)
+    client = discord.Client(intents = intents)
 
-
-
-    # initial server scrape
     @client.event
     async def on_ready():
-        global data
+        global DATA
 
-        print("Getting data...")
-        await client.change_presence(status=discord.Status.dnd)
-        data = await get_data(client)
-        await client.change_presence(status=discord.Status.online)
-        print("Ready to quoth")
+        # update data
+        for guild in client.guilds:
+            for channel in guild.text_channels:
+                try:
+                    async for message in channel.history(limit=None):
+                        DATA.update(message)
+                except discord.errors.Forbidden:
+                    pass
 
+        # save data
+        DATA.to_disk(data_dir)
 
-    # live updating
     @client.event
     async def on_message(message):
-        if data:
-            data[message.guild].append(message)
+        DATA.update(message)
 
-        text = message.content
-        if "quoth" in text.lower().replace(" ", "") or "QUOTH" in "".join(
-            filter(lambda c: c.isupper(), text)
-        ):
-            await message.add_reaction("🤔")
+        # react to "quoth" in message
+        content = message.content.strip()
+        if 'quoth' in content.lower().replace(' ', '') \
+        or 'QUOTH' in ''.join(filter(str.isupper, content)):
+            await message.add_reaction('🤔')
 
+        # # process commands
+        # prefix = '🐦'
+        # if content.startswith(prefix):
+        #     command, *args = content[len(prefix):].strip().split()
 
-    # respond
+        #     if command ==  'comms':
+        #         comms_channel_id = args[0]
+
     @client.event
     async def on_raw_reaction_add(event):
-        if event.emoji.name != "🐦":
+        if event.emoji.name !=  '🐦':
             return
 
+        # get random message
+        valid = lambda m: m.author.name not in config['quothbot']['banlist']
+        message = DATA.get_random(event.guild_id, valid)
+
+        if not message:
+            print('no message')
+
+        # send message
         channel = client.get_channel(event.channel_id)
-
-        # report no data
-        if not data:
-            content = "I can't quoth right now, I'm reading messages."
-            embed = discord.Embed(description=content)
-            await channel.send(embed=embed)
-            return
-
-        # filter messages
-        banned = lambda m: m.author.name in config["quothbot"]["banlist"]
-        messages = filter(lambda m: not banned(m), data[channel.guild])
-
-        # send random message
-        await channel.send(embed=embed_message(choice(list(messages))))
-
+        await channel.send(embed = embed_message(message))
 
     # start bot
-    client.run(config["quothbot"]["token"])
+    client.run(config['quothbot']['token'])
 
 
-if __name__ == "__main__":
+if __name__ ==  '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-c", "--config-file", default="config.ini")
+    parser.add_argument('-c', '--config-file', type=Path, default='config.ini')
+    parser.add_argument('-d', '--data-dir', type=Path, default='data')
     main(**vars(parser.parse_args()))
