@@ -2,9 +2,8 @@
 import os
 from asyncio import gather
 from configparser import ConfigParser
-from pathlib import Path
 
-import discord
+import discord # type: ignore
 
 from utils.data import QuothData
 from utils.topbot import media_posted
@@ -15,7 +14,7 @@ DATA = QuothData()
 
 
 # update DATA with the messages in a channel
-async def read_channel(channel):
+async def read_channel(channel: discord.TextChannel) -> None:
     try:
         async for message in channel.history(limit=None):
             DATA.update(message)
@@ -24,12 +23,31 @@ async def read_channel(channel):
 
 
 # update DATA with the messages in a guild
-async def read_guild(guild):
+async def read_guild(guild: discord.Guild) -> None:
     await gather(*map(read_channel, guild.text_channels))
 
 
+# load config from file or create default
+def load_config(path: str) -> ConfigParser:
+    config = ConfigParser()
+
+    if os.path.isfile(path):
+        config.read(path)
+    else:
+        config['bot'] = {
+            'token': '',
+            'banlist': ['QuothBot'] # type: ignore
+        }
+        config['comms'] = {}
+
+        with open(path, 'w') as f:
+            config.write(f)
+
+    return config
+
+
 # return an embedded message with author and timestamp
-def embed_message(message):
+def embed_message(message: discord.Message) -> discord.Embed:
     embed = discord.Embed(
         description = message.content,
         timestamp = message.created_at,
@@ -45,21 +63,10 @@ def embed_message(message):
     return embed
 
 
-def main(config_file):
-    config = ConfigParser()
+def main(config_file: str) -> None:
 
-    # load config from file or create one
-    if os.path.isfile(config_file):
-        config.read(config_file)
-    else:
-        config['bot'] = {
-            'token': '',
-            'banlist': ['QuothBot'],
-        }
-        config['comms'] = {}
-
-        with open(config_file, 'w') as f:
-            config.write(f)
+    # check config
+    config = load_config(config_file)
 
     if not config['bot']['token']:
         print(f'No token in "{config_file}"')
@@ -72,7 +79,7 @@ def main(config_file):
 
 
     # process message commands
-    def process_commands(message, command, *args):
+    def process_commands(message: discord.Message, command: str, *args: str) -> str:
         if command == 'comms':
             try:
                 comms_channel_id = int(args[0])
@@ -96,7 +103,7 @@ def main(config_file):
 
 
     @client.event
-    async def on_message(message):
+    async def on_message(message: discord.Message) -> None:
         if message.author.id == client.user.id:
             return
 
@@ -120,7 +127,7 @@ def main(config_file):
 
 
     @client.event
-    async def on_raw_reaction_add(event):
+    async def on_raw_reaction_add(event: discord.RawReactionActionEvent) -> None:
         if event.emoji.name != '🐦':
             return
 
@@ -145,7 +152,7 @@ def main(config_file):
 
 
     @client.event
-    async def on_ready():
+    async def on_ready() -> None:
         print('Ready to quoth')
 
         # update DATA
@@ -160,5 +167,5 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config-file', type=Path, default='config.ini')
+    parser.add_argument('-c', '--config-file', default='config.ini')
     main(**vars(parser.parse_args()))

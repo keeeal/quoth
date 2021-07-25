@@ -2,19 +2,21 @@
 import json
 from pathlib import Path
 
+from discord import Attachment, Message  # type: ignore
 
-def is_image(attachment):
+
+def is_image(attachment: Attachment) -> bool:
     return Path(attachment.filename).suffix.lower() in \
     {'.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff'}
 
 
-def is_video(attachment):
+def is_video(attachment: Attachment) -> bool:
     return Path(attachment.filename).suffix.lower() in \
     {'.avi', '.flv', '.m4v', '.mkv', '.mov', '.mp4', '.mpeg', '.mpg', '.wmv'}
 
 
 # return a json payload in a discord code block
-def media_posted(message, quoth):
+def media_posted(message: Message, quoth: Message) -> str:
     payload = {
         'eventType': 'media_posted',
         'tags': ['quoth'],
