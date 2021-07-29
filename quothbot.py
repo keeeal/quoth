@@ -4,6 +4,7 @@ from asyncio import gather
 from configparser import ConfigParser
 
 import discord # type: ignore
+from discord.ext import commands # type: ignore
 
 from utils.data import QuothData
 from utils.topbot import media_posted
@@ -75,36 +76,21 @@ def main(config_file: str) -> None:
     # create client
     intents = discord.Intents.default()
     intents.members = True
-    client = discord.Client(intents = intents)
+    bot = commands.Bot(command_prefix = '🐦', intents = intents)
 
 
-    # process message commands
-    def process_commands(message: discord.Message, command: str, *args: str) -> str:
-        if command == 'comms':
-            try:
-                comms_channel_id = int(args[0])
-            except ValueError:
-                return f'Invalid channel ID: {args[0]}'
+    @bot.command()
+    async def comms(context: commands.Context, comms_channel: discord.TextChannel) -> None:
+        config['comms'][str(context.guild.id)] = str(comms_channel.id)
+        await context.send(f'Registered comms channel: {comms_channel}')
 
-            channel_ids = map(lambda c: c.id, message.guild.text_channels)
-
-            if comms_channel_id not in channel_ids:
-                return f'Channel ID not in guild: {comms_channel_id}'
-
-            config['comms'][str(message.guild.id)] = str(comms_channel_id)
-
-            with open(config_file, 'w') as f:
-                config.write(f)
-
-            comms_channel = client.get_channel(comms_channel_id)
-            return f'Registered comms channel: {comms_channel}'
-        else:
-            return f'Unknown command: {command}'
+        with open(config_file, 'w') as f:
+            config.write(f)
 
 
-    @client.event
+    @bot.event
     async def on_message(message: discord.Message) -> None:
-        if message.author.id == client.user.id:
+        if message.author.id == bot.user.id:
             return
 
         # update DATA
@@ -117,28 +103,23 @@ def main(config_file: str) -> None:
             await message.add_reaction('🤔')
 
         # process commands
-        prefix = '🐦'
-        if content.startswith(prefix):
-            command, *args = content[len(prefix):].strip().split()
-            reply = process_commands(message, command, *args)
-
-            if reply:
-                await message.channel.send(reply)
+        await bot.process_commands(message)
 
 
-    @client.event
+    @bot.event
     async def on_raw_reaction_add(event: discord.RawReactionActionEvent) -> None:
         if event.emoji.name != '🐦':
             return
 
         # send random message
-        channel = client.get_channel(event.channel_id)
+        channel = bot.get_channel(event.channel_id)
         valid = lambda m: m.author.name not in config['bot']['banlist']
 
         try:
             message = DATA.get_random(event.guild_id, valid)
         except LookupError as e:
             await channel.send(str(e))
+            return
 
         quoth = await channel.send(embed = embed_message(message))
 
@@ -147,20 +128,20 @@ def main(config_file: str) -> None:
 
         if guild_id_str in config['comms']:
             comms_channel_id = int(config['comms'][guild_id_str])
-            comms_channel = client.get_channel(comms_channel_id)
+            comms_channel = bot.get_channel(comms_channel_id)
             await comms_channel.send(media_posted(message, quoth))
 
 
-    @client.event
+    @bot.event
     async def on_ready() -> None:
         print('Ready to quoth')
 
         # update DATA
-        await gather(*map(read_guild, client.guilds))
+        await gather(*map(read_guild, bot.guilds))
 
 
     # start bot
-    client.run(config['bot']['token'])
+    bot.run(config['bot']['token'])
 
 
 if __name__ == '__main__':

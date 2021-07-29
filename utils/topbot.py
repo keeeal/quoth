@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from discord import Attachment, Message  # type: ignore
+from discord import Attachment, Message, channel  # type: ignore
 
 
 def is_image(attachment: Attachment) -> bool:
@@ -48,7 +48,7 @@ def media_posted(message: Message, quoth: Message) -> str:
 
     payload['tags'] += [
         f'<@!{message.author.id}>',
-        str(message.channel),
+        f'<#{message.channel.id}>',
         str(message.created_at.year),
     ]
 
