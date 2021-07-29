@@ -2,9 +2,11 @@
 import os
 from asyncio import gather
 from configparser import ConfigParser
+from typing import Union
 
 import discord # type: ignore
 from discord.ext import commands # type: ignore
+from discord_slash import SlashCommand # type: ignore
 
 from utils.data import QuothData
 from utils.topbot import media_posted
@@ -54,7 +56,7 @@ def embed_message(message: discord.Message) -> discord.Embed:
         timestamp = message.created_at,
     ).set_author(
         name = message.author.display_name,
-        icon_url = message.author.avatar_url,
+        icon_url = message.author.avatar,
         url = message.jump_url,
     )
 
@@ -77,10 +79,36 @@ def main(config_file: str) -> None:
     intents = discord.Intents.default()
     intents.members = True
     bot = commands.Bot(command_prefix = '🐦', intents = intents)
+    slash = SlashCommand(bot, sync_commands = True)
+
+
+    async def send_quoth(
+        channel: Union[discord.TextChannel, commands.Context]
+    ) -> None:
+        valid = lambda m: m.author.name not in config['bot']['banlist']
+
+        try:
+            message = DATA.get_random(channel.guild.id, valid)
+        except LookupError as e:
+            await channel.send(str(e))
+            return
+
+        quoth = await channel.send(embed = embed_message(message))
+
+        # notify comms
+        guild_id_str = str(channel.guild.id)
+
+        if guild_id_str in config['comms']:
+            comms_channel_id = int(config['comms'][guild_id_str])
+            comms_channel = bot.get_channel(comms_channel_id)
+            await comms_channel.send(media_posted(message, quoth))
 
 
     @bot.command()
-    async def comms(context: commands.Context, comms_channel: discord.TextChannel) -> None:
+    async def comms(
+        context: commands.Context,
+        comms_channel: discord.TextChannel
+    ) -> None:
         config['comms'][str(context.guild.id)] = str(comms_channel.id)
         await context.send(f'Registered comms channel: {comms_channel}')
 
@@ -107,29 +135,13 @@ def main(config_file: str) -> None:
 
 
     @bot.event
-    async def on_raw_reaction_add(event: discord.RawReactionActionEvent) -> None:
+    async def on_raw_reaction_add(
+        event: discord.RawReactionActionEvent
+    ) -> None:
         if event.emoji.name != '🐦':
             return
 
-        # send random message
-        channel = bot.get_channel(event.channel_id)
-        valid = lambda m: m.author.name not in config['bot']['banlist']
-
-        try:
-            message = DATA.get_random(event.guild_id, valid)
-        except LookupError as e:
-            await channel.send(str(e))
-            return
-
-        quoth = await channel.send(embed = embed_message(message))
-
-        # notify comms
-        guild_id_str = str(event.guild_id)
-
-        if guild_id_str in config['comms']:
-            comms_channel_id = int(config['comms'][guild_id_str])
-            comms_channel = bot.get_channel(comms_channel_id)
-            await comms_channel.send(media_posted(message, quoth))
+        await send_quoth(bot.get_channel(event.channel_id))
 
 
     @bot.event
@@ -138,6 +150,11 @@ def main(config_file: str) -> None:
 
         # update DATA
         await gather(*map(read_guild, bot.guilds))
+
+
+    @slash.slash(description='Caw! Caw!')
+    async def quoth(context: commands.Context):
+        await send_quoth(context)
 
 
     # start bot
