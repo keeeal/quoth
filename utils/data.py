@@ -27,31 +27,34 @@ class Atomic:
         self._load = value
 
 
-class QuothData():
-    def __init__(self):
-        self.data = {}
-
-    def update(self, message: Message) -> None:
+class QuothData(dict):
+    def add(self, message: Message) -> None:
         guild_id = message.guild.id
 
-        if guild_id not in self.data:
-            self.data[guild_id] = Atomic({})
+        if guild_id not in self:
+            self[guild_id] = Atomic({})
 
-        with self.data[guild_id].lock:
-            self.data[guild_id].load[message.id] = message
+        with self[guild_id].lock:
+            self[guild_id].load[message.id] = message
 
-    def get_random(self, guild_id: int,
+    def filter(self, guild_id: int,
+        valid: Optional[Callable[[Message], bool]] = None
+    ) -> list[Message]:
+        if guild_id in self:
+            with self[guild_id].lock:
+                return list(filter(valid, self[guild_id].load.values()))
+        else:
+            raise LookupError('Guild ID not in data.')
+
+    def random(self, guild_id: int,
         valid: Optional[Callable[[Message], bool]] = None
     ) -> Message:
-        try:
-            with self.data[guild_id].lock:
-                message = choice(list(filter(
-                    valid, self.data[guild_id].load.values()
-                )))
-        except KeyError:
-            raise LookupError(f'Guild ID not in data.')
-        except IndexError:
-            raise LookupError(f'No valid messages.')
+        messages = self.filter(guild_id, valid)
+
+        if len(messages):
+            message = choice(messages)
+        else:
+            raise LookupError('No valid messages.')
 
         if len(message.attachments) > 1:
             message.attachements = [choice(message.attachments)]
