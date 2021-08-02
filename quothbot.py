@@ -185,8 +185,8 @@ def main(config_file: str) -> None:
 
         await context.send(
             f'{n_messages} messages' \
-            + (f'by {user}' if user else '') \
-            + (f'in {channel}' if channel else '')
+            + (f' by {user.mention}' if user else '') \
+            + (f' in {channel.mention}' if channel else '')
         )
 
     # start bot
