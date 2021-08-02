@@ -10,20 +10,20 @@ def find_urls(content: str) -> list[str]:
     return re.findall(pattern, content)
 
 
-def is_image(attachment: Attachment) -> bool:
-    return Path(attachment.filename).suffix.lower() in \
+def is_image(filename: str) -> bool:
+    return Path(filename).suffix.lower() in \
     {'.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff'}
 
 
-def is_video(attachment: Attachment) -> bool:
-    return Path(attachment.filename).suffix.lower() in \
+def is_video(filename: str) -> bool:
+    return Path(filename).suffix.lower() in \
     {'.avi', '.flv', '.gif', '.m4v', '.mkv', '.mov', '.mp4', '.mpeg', '.mpg', '.webm', '.wmv'}
 
 
 # return a json payload in a discord code block
 def media_posted(message: Message, quoth: Message) -> str:
-    has_image = any(map(is_image, message.attachments))
-    has_video = any(map(is_video, message.attachments))
+    has_image = any(is_image(a.filename) for a in message.attachments)
+    has_video = any(is_video(a.filename) for a in message.attachments)
     urls = find_urls(message.content)
 
     payload = {
