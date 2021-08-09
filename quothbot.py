@@ -1,7 +1,5 @@
 
-import os
 from asyncio import gather
-from configparser import ConfigParser
 from typing import Callable, Optional, Union
 
 import discord # type: ignore
@@ -10,43 +8,8 @@ from discord_slash import SlashCommand, SlashContext # type: ignore
 from discord_slash.utils.manage_commands import create_option # type: ignore
 
 from utils.data import QuothData
+from utils.func import embed_message, load_config
 from utils.topbot import media_posted
-
-
-# load config from file or create default
-def load_config(path: str) -> ConfigParser:
-    config = ConfigParser()
-
-    if os.path.isfile(path):
-        config.read(path)
-    else:
-        config['bot'] = {
-            'token': '',
-            'banlist': ['QuothBot'] # type: ignore
-        }
-        config['comms'] = {}
-
-        with open(path, 'w') as f:
-            config.write(f)
-
-    return config
-
-
-# return an embedded message with author and timestamp
-def embed_message(message: discord.Message) -> discord.Embed:
-    embed = discord.Embed(
-        description = message.content,
-        timestamp = message.created_at,
-    ).set_author(
-        name = message.author.display_name,
-        icon_url = message.author.avatar,
-        url = message.jump_url,
-    )
-
-    if message.attachments:
-        embed.set_image(url = message.attachments[0].url)
-
-    return embed
 
 
 def main(config_file: str) -> None:
