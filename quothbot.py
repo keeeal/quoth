@@ -1,165 +1,103 @@
-
+from argparse import ArgumentParser
 from asyncio import gather
-from typing import Callable, Optional, Union
+from pathlib import Path
+from typing import Callable, Optional
 
-import discord # type: ignore
-from discord.ext import commands # type: ignore
-from discord_slash import SlashCommand, SlashContext # type: ignore
-from discord_slash.utils.manage_commands import create_option # type: ignore
+from discord import Intents, Message, MessageType, RawReactionActionEvent, TextChannel
+from discord.ext.commands import Bot
 
+from utils.config import load_config
+from utils.message import embed_message
 from utils.data import QuothData
-from utils.func import embed_message, load_config
-from utils.topbot import media_posted
 
 
-def main(config_file: str) -> None:
-    config = load_config(config_file)
+DEFAULT_CONFIG = {"bot": {"token": "", "banlist": ["QuothBot"]}, "comms": {}}
 
-    if not config['bot']['token']:
-        print(f'No token in "{config_file}"')
-        return
 
-    def not_banned(message: discord.Message) -> bool:
-        return message.author.name not in config['bot']['banlist']
+class QuothBot(Bot):
+    def __init__(self, banlist: list[str]):
+        intents = Intents.default()
+        intents.members = True
+        super().__init__(command_prefix="!", intents=intents)
 
-    # create client and data
-    intents = discord.Intents.default()
-    intents.members = True
-    bot = commands.Bot(command_prefix = '🐦', intents = intents)
-    slash = SlashCommand(bot, sync_commands = True)
-    data = QuothData()
+        self.data = QuothData()
+        self.banlist = banlist
 
-    async def send_quoth(
-        channel: Union[discord.TextChannel, commands.Context, SlashContext],
-        valid: Optional[Callable[[discord.Message], bool]] = None,
-    ) -> None:
-        try:
-            message = data.random(channel.guild.id, valid)
-        except LookupError as error_message:
-            await channel.send(
-                content = str(error_message),
-                hidden = isinstance(channel, SlashContext),
-            )
-        else:
-            quoth = await channel.send(embed = embed_message(message))
-
-            # notify comms
-            if str(channel.guild.id) in config['comms']:
-                comms_channel_id = int(config['comms'][str(channel.guild.id)])
-                comms_channel = bot.get_channel(comms_channel_id)
-                await comms_channel.send(media_posted(message, quoth))
-
-    async def add_channel(channel: discord.TextChannel) -> None:
-        try:
-            async for message in channel.history(limit = None):
-                data.add(message)
-        except discord.errors.Forbidden:
-            pass
-
-    async def add_guild(guild: discord.Guild) -> None:
-        await gather(*map(add_channel, guild.text_channels))
-
-    @bot.event
-    async def on_guild_join(guild) -> None:
-        await add_guild(guild)
-
-    @bot.event
-    async def on_ready() -> None:
-        print('Ready to quoth')
-        await gather(*map(add_guild, bot.guilds))
-
-    @bot.event
-    async def on_message(message: discord.Message) -> None:
-        if message.type == discord.MessageType.default:
-            data.add(message)
-
-        # react to "quoth" in message
-        if message.author != bot.user:
-            content = message.content.strip()
-            if 'quoth' in content.lower().replace(' ', '') \
-            or 'QUOTH' in ''.join(filter(str.isupper, content)):
-                await message.add_reaction('🤔')
-
-        # process commands
-        await bot.process_commands(message)
-
-    @bot.event
-    async def on_raw_reaction_add(
-        event: discord.RawReactionActionEvent
-    ) -> None:
-        if event.emoji.name == '🐦':
-            await send_quoth(bot.get_channel(event.channel_id), not_banned)
-
-    @slash.slash(
-        description = 'Caw! Caw!',
-        options = [
-            create_option(
-                name = "user",
-                description = "Quoth a message from a user",
-                option_type = 6,
-                required = False,
-            ),
-        ]
-    )
     async def quoth(
-        context: SlashContext,
-        user: Optional[discord.Member] = None,
-    ) -> None:
-        select_user = lambda m: m.author == user or user == None
-        await send_quoth(
-            channel = context,
-            valid = lambda m: select_user(m) and not_banned(m)
-        )
+        self,
+        channel: TextChannel,
+        _filter: Optional[Callable[[Message], bool]] = lambda _: True,
+    ):
+        def __filter(message: Message) -> bool:
+            return all(
+                [
+                    _filter(message),
+                    self.not_author_banned(message),
+                    self.not_in_comms_channel(message),
+                ]
+            )
 
-    @slash.slash(description = 'Register channel as comms')
-    async def comms(context: SlashContext) -> None:
-        config['comms'][str(context.guild_id)] = str(context.channel_id)
-        await context.send('Registered comms channel.')
+        try:
+            message = self.data.get_random_message(channel.guild.id, __filter)
+        except LookupError as error:
+            await channel.send(content=str(error))
+        else:
+            quoth = await channel.send(embed=embed_message(message))
 
-    @slash.slash(
-        description = 'Count messages in server',
-        options = [
-            create_option(
-                name = "user",
-                description = "Count messages from a user",
-                option_type = 6,
-                required = False,
-            ),
-            create_option(
-                name = "channel",
-                description = "Count messages in a channel",
-                option_type = 7,
-                required = False,
-            ),
-        ]
-    )
-    async def count(
-        context: SlashContext,
-        user: Optional[discord.Member] = None,
-        channel: Optional[discord.TextChannel] = None,
-    ) -> None:
-        select_user = lambda m: m.author == user or user == None
-        select_channel = lambda m: m.channel == channel or channel == None
+            if topbot := self.get_cog("TopBot"):
+                await topbot.notify(message, quoth)
 
-        n_messages = len(data.filter(
-            guild_id = context.guild_id,
-            valid = lambda m: select_user(m) and select_channel(m),
-        ))
+    async def on_ready(self):
+        print("Ready to quoth")
+        await gather(*map(self.data.add_guild, self.guilds))
 
-        await context.send(
-            f'{n_messages} messages' \
-            + (f' by {user.mention}' if user else '') \
-            + (f' in {channel.mention}' if channel else '')
-        )
+    async def on_guild_join(self, guild):
+        await self.data.add_guild(guild)
 
-    # start bot
-    bot.run(config['bot']['token'])
+    async def on_message(self, message: Message):
+        if message.type in [MessageType.default]:
+            self.data.add_message(message)
+
+        if message.author != self.user:
+            content = message.content.lower()
+            if "quoth" in "".join(i for i in content if i in "quoth"):
+                await message.add_reaction("🤔")
+
+        await self.process_commands(message)
+
+    async def on_raw_reaction_add(self, event: RawReactionActionEvent):
+        if event.emoji.name == "🐦":
+            channel = self.get_channel(event.channel_id)
+            await self.quoth(channel)
+
+    def not_author_banned(self, message: Message) -> bool:
+        return message.author.name not in self.banlist
+
+    def not_in_comms_channel(self, message: Message) -> bool:
+        if (topbot := self.get_cog("TopBot")) is None:
+            return True
+
+        return str(message.channel.id) != topbot.comms[str(message.guild.id)]
 
 
+def main(config_file: Path, topbot: bool = False):
+    config = load_config(config_file, DEFAULT_CONFIG)
 
-if __name__ == '__main__':
-    import argparse
+    if not config["bot"]["token"]:
+        print(f"No token in '{config_file}'")
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config-file', default = 'config.ini')
+    bot = QuothBot(config["bot"]["banlist"])
+
+    if topbot:
+        from ext.topbot import TopBot
+
+        bot.add_cog(TopBot(bot, config["comms"]))
+
+    bot.run(config["bot"]["token"])
+
+
+if __name__ == "__main__":
+    parser = ArgumentParser()
+    parser.add_argument("-c", "--config-file", type=Path, default="config.ini")
+    parser.add_argument("-top", "--topbot", action="store_true")
     main(**vars(parser.parse_args()))
