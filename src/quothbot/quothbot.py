@@ -1,17 +1,11 @@
-from argparse import ArgumentParser
 from asyncio import gather
-from pathlib import Path
 from typing import Callable, Optional
 
 from discord import Intents, Message, MessageType, RawReactionActionEvent, TextChannel
 from discord.ext.commands import Bot
 
-from utils.config import load_config
-from utils.message import embed_message
-from utils.data import QuothData
-
-
-DEFAULT_CONFIG = {"bot": {"token": "", "banlist": ["QuothBot"]}, "comms": {}}
+from .utils.message import embed_message
+from .utils.data import QuothData
 
 
 class QuothBot(Bot):
@@ -78,26 +72,3 @@ class QuothBot(Bot):
             return True
 
         return str(message.channel.id) != topbot.comms[str(message.guild.id)]
-
-
-def main(config_file: Path, topbot: bool = False):
-    config = load_config(config_file, DEFAULT_CONFIG)
-
-    if not config["bot"]["token"]:
-        print(f"No token in '{config_file}'")
-
-    bot = QuothBot(config["bot"]["banlist"])
-
-    if topbot:
-        from ext.topbot import TopBot
-
-        bot.add_cog(TopBot(bot, config["comms"]))
-
-    bot.run(config["bot"]["token"])
-
-
-if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument("-c", "--config-file", type=Path, default="config.ini")
-    parser.add_argument("-top", "--topbot", action="store_true")
-    main(**vars(parser.parse_args()))

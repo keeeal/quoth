@@ -1,0 +1,22 @@
+version: '3'
+
+volumes:
+  config:
+
+services:
+  quothbot:
+    image: quothbot:latest
+    build:
+      context: .
+      target: app
+    volumes:
+      - ./config:/config
+    environment:
+      - DISCORD_BOT_TOKEN
+    command: python -m quothbot
+
+  # quothbot-dev:
+  #   image: quothbot:dev
+  #   build:
+  #     context: .
+  #     target: dev

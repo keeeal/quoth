@@ -8,7 +8,7 @@ def load_config(file: Path, default: dict) -> ConfigParser:
     if file.is_file():
         config.read(file)
     else:
-        for key, value in default:
+        for key, value in default.items():
             config[key] = value
 
         with open(file, "w") as f:
