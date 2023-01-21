@@ -1,12 +1,12 @@
-import json
+from json import dumps
 from typing import Optional
 
 from discord import Message
-from discord.ext.commands import Bot, Cog, command, Context
+from discord.ext.commands import Bot, Cog, Context, command
 
-from utils.message import embed_message
-from utils.path import is_image, is_video
-from utils.string import find_urls, truncate
+from ..utils.message import embed_message
+from ..utils.path import is_image, is_video
+from ..utils.string import find_urls, truncate
 
 
 class TopBot(Cog):
@@ -25,6 +25,9 @@ class TopBot(Cog):
         if str(quoth.guild.id) in self.comms:
             channel = self.bot.get_channel(int(self.comms[str(quoth.guild.id)]))
             await channel.send(media_posted(message, quoth))
+
+    def message_not_in_comms_channel(self, message: Message) -> bool:
+        return str(message.channel.id) != self.comms[str(message.guild.id)]
 
 
 def media_posted(message: Message, quoth: Message) -> str:
@@ -95,8 +98,4 @@ def media_posted(message: Message, quoth: Message) -> str:
         "description": f'{message.author.name}: "{truncate(description)}"',
     }
 
-    return f"```json\n{json.dumps(payload, indent=2)}```"
-
-
-def setup(bot: Bot):
-    bot.add_cog(TopBot(bot))
+    return f"```json\n{dumps(payload, indent=2)}```"

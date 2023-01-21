@@ -1,4 +1,9 @@
 from re import findall
+from typing import Callable
+
+
+def str_filter(predicate: Callable[[str], bool], text: str) -> str:
+    return "".join(filter(predicate, text))
 
 
 def find_urls(text: str) -> list[str]:
