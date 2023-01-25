@@ -1,13 +1,15 @@
+from dataclasses import dataclass
+
 from discord import RawReactionActionEvent
 from discord.ext.commands import Cog
 
 from ..bot import QuothBot
 
 
+@dataclass
 class Quoth(Cog):
-    def __init__(self, bot: QuothBot, emoji: str) -> None:
-        self.bot = bot
-        self.emoji = emoji
+    bot: QuothBot
+    emoji: str
 
     @Cog.listener()
     async def on_raw_reaction_add(self, event: RawReactionActionEvent):

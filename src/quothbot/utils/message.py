@@ -1,7 +1,7 @@
 from collections import Counter
 from itertools import chain
-from pathlib import Path
 from typing import Optional
+
 from discord import Embed, Message, User
 
 from .path import is_image, is_video
@@ -85,8 +85,8 @@ def has_text(message: Message, substring: Optional[str] = None) -> bool:
 
 
 def has_image(message: Message) -> bool:
-    return any(map(is_image, [Path(a.filename) for a in message.attachments]))
+    return any(is_image(a.filename) for a in message.attachments)
 
 
 def has_video(message: Message) -> bool:
-    return any(map(is_video, [Path(a.filename) for a in message.attachments]))
+    return any(is_video(a.filename) for a in message.attachments)

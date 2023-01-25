@@ -1,19 +1,21 @@
-from configparser import ConfigParser
+import logging
+from json import dump, load
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
-def load_config(file: Path, default: Optional[dict] = None) -> ConfigParser:
-    config = ConfigParser()
-
+def read_config(
+    file: Path,
+    default: Optional[dict[str, dict[str, Any]]] = None,
+) -> Optional[dict[str, dict[str, Any]]]:
     if file.is_file():
-        config.read(file)
-    else:
-        if default:
-            for key, value in default.items():
-                config[key] = value
-
+        logging.info(f"Reading: {file}")
+        with open(file) as f:
+            return load(f)
+    elif default:
+        logging.info(f"Creating: {file}")
         with open(file, "w") as f:
-            config.write(f)
-
-    return config
+            dump(default, f, indent=2)
+        return default
+    else:
+        logging.info(f"Not found: {file}")

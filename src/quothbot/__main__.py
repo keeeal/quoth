@@ -1,3 +1,4 @@
+import logging
 from argparse import ArgumentParser
 from asyncio import run
 from pathlib import Path
@@ -6,38 +7,46 @@ from .bot import QuothBot
 from .ext.quoth import Quoth
 from .ext.react import React
 from .ext.topbot import TopBot
-from .utils.config import load_config
+from .utils.config import read_config
+
+DEFAULT_CONFIG = {
+    "token": "",
+    "bot": {
+        "command_prefix": "!!!",
+    },
+    "quoth": {
+        "emoji": "🐦",
+    },
+    "react": {
+        "emoji": "🤔",
+    },
+    "topbot": {},
+}
 
 
-DEFAULT_CONFIG = {"bot": {"token": "", "banlist": ["QuothBot"]}, "comms": {}}
+def main(config_file: Path):
+    logging.basicConfig(level=logging.INFO)
+    config = read_config(config_file, DEFAULT_CONFIG)
 
-
-def main(
-    config_file: Path,
-    react: bool = False,
-    topbot: bool = False,
-):
-    config = load_config(config_file, DEFAULT_CONFIG)
-
-    if not config["bot"]["token"]:
+    if not config["token"]:
         print(f"No token in '{config_file}'")
         return
 
-    bot = QuothBot(config["bot"]["banlist"])
-    run(bot.add_cog(Quoth(bot, "🐦")))
+    bot = QuothBot(**config["bot"])
 
-    if react:
-        bot.add_cog(React(bot, "🤔"))
+    if "quoth" in config:
+        run(bot.add_cog(Quoth(bot, **config["quoth"])))
 
-    if topbot:
-        bot.add_cog(TopBot(bot, config["comms"]))
+    if "react" in config:
+        run(bot.add_cog(React(bot, **config["react"])))
 
-    bot.run(config["bot"]["token"])
+    if "topbot" in config:
+        run(bot.add_cog(TopBot(bot, **config["topbot"])))
+
+    bot.run(config["token"])
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("-c", "--config-file", type=Path, default="/config/config.ini")
-    parser.add_argument("-r", "--react", action="store_true")
-    parser.add_argument("-t", "--topbot", action="store_true")
+    parser.add_argument("-c", "--config-file", type=Path, default="/config/config.json")
     main(**vars(parser.parse_args()))

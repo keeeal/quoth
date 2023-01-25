@@ -1,11 +1,13 @@
+from dataclasses import dataclass
+
 from discord import Message
 from discord.ext.commands import Bot, Cog
 
 
+@dataclass
 class React(Cog):
-    def __init__(self, bot: Bot, emoji: str) -> None:
-        self.bot = bot
-        self.emoji = emoji
+    bot: Bot
+    emoji: str
 
     @Cog.listener()
     async def on_message(self, message: Message):
