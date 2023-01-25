@@ -75,11 +75,13 @@ def media_posted(message: Message, quoth: Message) -> str:
 
     tags.update({tag + "s" for tag in tags})
 
-    tags.update({
-        message.author.mention,
-        message.channel.mention,
-        str(message.created_at.year),
-    })
+    tags.update(
+        {
+            message.author.mention,
+            message.channel.mention,
+            str(message.created_at.year),
+        }
+    )
 
     payload = {
         "eventType": "media_posted",

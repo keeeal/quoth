@@ -14,10 +14,7 @@ def embed_message(message: Message) -> Embed:
     else:
         description = message.content
 
-    embed = Embed(
-        description=description,
-        timestamp=message.created_at,
-    ).set_author(
+    embed = Embed(description=description, timestamp=message.created_at).set_author(
         name=message.author.display_name,
         icon_url=message.author.avatar.url,
         url=message.jump_url,
@@ -70,7 +67,9 @@ def has_url(message: Message, substring: Optional[str] = None) -> bool:
     urls = find_urls(message.content)
 
     if substring:
-        urls = filter(lambda url: substring.lower() in str_filter(str.isalnum, url).lower(), urls)
+        urls = filter(
+            lambda url: substring.lower() in str_filter(str.isalnum, url).lower(), urls
+        )
 
     return len(list(urls)) > 0
 

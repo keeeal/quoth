@@ -34,7 +34,9 @@ class QuothBot(Bot):
         *filters: Callable[[Message], bool],
     ) -> None:
         try:
-            message = self.data.get_random_message(channel.guild.id, *self.filters, *filters)
+            message = self.data.get_random_message(
+                channel.guild.id, *self.filters, *filters
+            )
         except LookupError as error:
             logging.error(str(error))
             await channel.send(content=str(error))
