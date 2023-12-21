@@ -1,15 +1,24 @@
 [project]
-name = "quothbot"
+name = "quoth"
 version = "0.0.0"
 authors = [{name = "James Keal", email = "james@keal.au"}]
 
 dependencies = [
-  "discord",
+  "asyncpg",
+  "discord.py",
+  "pgvector",
+  "pydantic",
+  "pyyaml",
 ]
 
 [project.optional-dependencies]
 dev = [
+  "black",
+  "isort",
+  "mypy",
+  "pip-tools",
   "pytest",
+  "types-pyyaml",
 ]
 
 [build-system]

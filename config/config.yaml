@@ -1,0 +1,6 @@
+bot:
+  command_prefix: '!'
+quoth:
+  emoji: 🐦
+react:
+  emoji: 🤔

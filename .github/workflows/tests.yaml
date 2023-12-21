@@ -1,0 +1,57 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+
+  formatting:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Build docker images
+      run: |
+        docker compose build dev
+
+    - name: Check formatting
+      run: |
+        make check-format
+
+  types:
+    name: Types
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Build docker images
+      run: |
+        docker compose build dev
+
+    - name: Check types
+      run: |
+        make check-types
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Build docker images
+      run: |
+        docker compose build dev
+
+    - name: Build parts
+      run: |
+        make test

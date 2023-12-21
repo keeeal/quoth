@@ -1,21 +1,35 @@
 build:
-	docker compose build
+	docker compose build bot
 
-run:
-	docker compose up quothbot
+up:
+	docker compose up data bot
 
-lock:
-	pip install -Uq pip pip-tools; \
-	pip-compile -v -o requirements.txt \
-		--resolver backtracking\
-		--generate-hashes \
-		--no-emit-index-url \
+test:
+	docker compose run dev pytest tests
+
+format:
+	docker compose run dev sh -c \
+		"isort --profile black . && black ."
+
+check-format:
+	docker compose run dev sh -c \
+		"isort --profile black --check . && black --check ."
+
+check-types:
+	docker compose run dev mypy --check-untyped-defs .
+
+requirements:
+	docker compose run dev pip-compile \
+		--quiet \
 		--upgrade \
+		--output-file requirements.txt \
 		pyproject.toml
-	pip-compile -v -o requirements-dev.txt \
-		--resolver backtracking\
-		--generate-hashes \
-		--no-emit-index-url \
+	docker compose run dev pip-compile \
+		--quiet \
 		--upgrade \
 		--extra dev \
+		--output-file requirements-dev.txt \
 		pyproject.toml
+
+clean:
+	git clean -Xdf

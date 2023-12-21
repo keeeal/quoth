@@ -1,22 +1,53 @@
-version: '3'
-
-volumes:
-  config:
-
+version: "3"
 services:
-  quothbot:
-    image: quothbot:latest
+
+  bot:
+    image: quoth:latest
     build:
       context: .
       target: app
     volumes:
-      - ./config:/config
+      - ./config:/app/config
+      - ./data:/app/data
+    depends_on:
+      data:
+        condition: service_healthy
+        restart: true
     environment:
-      - DISCORD_BOT_TOKEN
-    command: python -m quothbot
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token
+      HUGGINGFACE_TOKEN_FILE: /run/secrets/huggingface_token
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+       - discord_token
+       - huggingface_token
+       - postgres_password
 
-  # quothbot-dev:
-  #   image: quothbot:dev
-  #   build:
-  #     context: .
-  #     target: dev
+  data:
+    image: ankane/pgvector:latest
+    volumes:
+      - ./data:/app/data
+    environment:
+      PGDATA: /app/data
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+       - postgres_password
+    ports:
+      - 5432:5432
+    healthcheck:
+      test: ["CMD", "pg_isready", "--username", "postgres"]
+
+  dev:
+    image: quoth:dev
+    build:
+      context: .
+      target: dev
+    volumes:
+      - .:/app
+
+secrets:
+  discord_token:
+    file: secrets/discord_token
+  huggingface_token:
+    file: secrets/huggingface_token
+  postgres_password:
+    file: secrets/postgres_password
