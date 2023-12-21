@@ -6,9 +6,9 @@ from asyncpg import Connection, connect  # type: ignore[import]
 from discord import Guild, Message, MessageType, TextChannel, Thread
 from discord.errors import Forbidden
 from pgvector.asyncpg import register_vector  # type: ignore[import]
+from sentence_transformers import SentenceTransformer  # type: ignore[import]
 
 from quoth.errors import NoGuild, NotFound
-from quoth.model import QuothModel
 from quoth.utils.config import read_from_env_var
 from quoth.utils.logging import get_logger
 
@@ -18,7 +18,7 @@ LOGGER = get_logger(__name__)
 class QuothData:
     def __init__(self, fetch_message: Callable[[int, int], Awaitable[Message]]) -> None:
         self.fetch_message = fetch_message
-        self.model = QuothModel("BAAI/bge-small-en-v1.5")
+        self.model = SentenceTransformer("BAAI/bge-small-en-v1.5")
         self.password = read_from_env_var("POSTGRES_PASSWORD_FILE")
 
     @asynccontextmanager
@@ -72,7 +72,7 @@ class QuothData:
             ):
                 return
 
-        embedding = await self.model.embed(message.content)
+        embedding = self.model.encode(message.content)
 
         async with self.connect() as connection:
             await connection.execute(
@@ -116,7 +116,7 @@ class QuothData:
                 message.id,
             )
 
-        return embedding or await self.model.embed(message.content)
+        return embedding or self.model.encode(message.content)
 
     async def get_random_message(self, guild_id: int) -> Message:
         async with self.connect() as connection:
