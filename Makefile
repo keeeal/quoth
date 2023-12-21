@@ -20,12 +20,12 @@ check-types:
 
 requirements:
 	docker compose run dev pip-compile \
-		--quiet \
+		--verbose \
 		--upgrade \
 		--output-file requirements.txt \
 		pyproject.toml
 	docker compose run dev pip-compile \
-		--quiet \
+		--verbose \
 		--upgrade \
 		--extra dev \
 		--output-file requirements-dev.txt \
