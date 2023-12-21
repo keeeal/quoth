@@ -6,7 +6,7 @@ from asyncpg import Connection, connect  # type: ignore[import]
 from discord import Guild, Message, MessageType, TextChannel, Thread
 from discord.errors import Forbidden
 from pgvector.asyncpg import register_vector  # type: ignore[import]
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer  # type: ignore[import]
 
 from quoth.errors import NoGuild, NotFound
 from quoth.utils.config import read_from_env_var
