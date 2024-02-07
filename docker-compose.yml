@@ -12,7 +12,6 @@ services:
     depends_on:
       data:
         condition: service_healthy
-        restart: true
     environment:
       DISCORD_TOKEN_FILE: /run/secrets/discord_token
       HUGGINGFACE_TOKEN_FILE: /run/secrets/huggingface_token

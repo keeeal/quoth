@@ -1,25 +1,52 @@
+from __future__ import annotations
+
 from asyncio import gather
 from contextlib import asynccontextmanager
-from typing import Awaitable, Callable, Optional, Union
+from typing import Optional, Union
 
 from asyncpg import Connection, connect  # type: ignore[import]
 from discord import Guild, Message, MessageType, TextChannel, Thread
 from discord.errors import Forbidden
+from numpy.typing import NDArray
 from pgvector.asyncpg import register_vector  # type: ignore[import]
+from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer  # type: ignore[import]
 
-from quoth.errors import NoGuild, NotFound
 from quoth.utils.config import read_from_env_var
 from quoth.utils.logging import get_logger
+from quoth.utils.message import get_content
 
 LOGGER = get_logger(__name__)
 
 
+class MessageRecord(BaseModel):
+    class Config:
+        arbitrary_types_allowed = True
+
+    message_id: int
+    channel_id: int
+    guild_id: int
+    embedding: Optional[NDArray]
+
+    @classmethod
+    def from_message(
+        cls, message: Message, embedding: Optional[NDArray] = None
+    ) -> MessageRecord:
+        return cls(
+            message_id=message.id,
+            channel_id=message.channel.id,
+            guild_id=message.guild.id,
+            embedding=embedding,
+        )
+
+
 class QuothData:
-    def __init__(self, fetch_message: Callable[[int, int], Awaitable[Message]]) -> None:
-        self.fetch_message = fetch_message
-        self.model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+    def __init__(self, model_name: str) -> None:
         self.password = read_from_env_var("POSTGRES_PASSWORD_FILE")
+        self.model = SentenceTransformer(model_name)
+        self.ndim: int = self.model.get_sentence_embedding_dimension() or 0
+        if self.ndim == 0:
+            raise ValueError("Invalid embedding dimension")
 
     @asynccontextmanager
     async def connect(self) -> Connection:
@@ -43,37 +70,27 @@ class QuothData:
                 f"""
                 create table if not exists message (
                     message_id bigint primary key,
-                    channel_id bigint,
-                    guild_id bigint,
-                    embedding vector({384})
+                    channel_id bigint not null,
+                    guild_id bigint not null,
+                    embedding vector({self.ndim})
                 )
                 """,
             )
 
-    async def add_message(self, message: Message) -> None:
-        if message.author.bot:
-            return
-
-        if message.type not in [MessageType.default, MessageType.reply]:
-            return
-
-        if message.guild is None:
-            return
-
+    async def message_id_exists(self, message_id: int) -> bool:
         async with self.connect() as connection:
-            if await connection.fetchval(
+            return await connection.fetchval(
                 """
                 select exists (
                     select 1 from message
                     where message_id = $1
+                    limit 1
                 )
                 """,
-                message.id,
-            ):
-                return
+                message_id,
+            )
 
-        embedding = self.model.encode(message.content)
-
+    async def add_record(self, record: MessageRecord) -> None:
         async with self.connect() as connection:
             await connection.execute(
                 """
@@ -83,12 +100,28 @@ class QuothData:
                     guild_id,
                     embedding
                 ) values ($1, $2, $3, $4)
+                on conflict do nothing
                 """,
-                message.id,
-                message.channel.id,
-                message.guild.id,
-                embedding,
+                record.message_id,
+                record.channel_id,
+                record.guild_id,
+                record.embedding,
             )
+
+    async def add_message(self, message: Message) -> None:
+        if message.author.bot:
+            return
+        if message.guild is None:
+            return
+        if message.type not in [MessageType.default, MessageType.reply]:
+            return
+        if not (content := get_content(message)) and len(message.attachments) == 0:
+            return
+        if await self.message_id_exists(message.id):
+            return
+
+        embedding = self.model.encode(content) if content else None
+        await self.add_record(MessageRecord.from_message(message, embedding))
 
     async def add_channel(self, channel: Union[TextChannel, Thread]) -> None:
         try:
@@ -98,11 +131,12 @@ class QuothData:
             LOGGER.warning(f"Channel forbidden: {channel.name}")
         else:
             LOGGER.info(f"Added channel: {channel.name}")
-            # LOGGER.info(f"{await self.get_number_of_messages(channel.guild.id)} messages")
 
     async def add_guild(self, guild: Guild) -> None:
-        await gather(*map(self.add_channel, guild.text_channels))
-        await gather(*map(self.add_channel, guild.threads))
+        await gather(
+            *map(self.add_channel, guild.text_channels),
+            *map(self.add_channel, guild.threads),
+        )
         LOGGER.info(f"Added guild: {guild.name}")
 
     async def get_embedding(self, message: Message) -> list[float]:
@@ -118,11 +152,11 @@ class QuothData:
 
         return embedding or self.model.encode(message.content)
 
-    async def get_random_message(self, guild_id: int) -> Message:
+    async def get_random_message_record(self, guild_id: int) -> MessageRecord:
         async with self.connect() as connection:
             record = await connection.fetchrow(
                 """
-                select (channel_id, message_id) from message
+                select * from message
                 where guild_id = $1
                 order by random()
                 limit 1
@@ -131,20 +165,20 @@ class QuothData:
             )
 
         if record is None:
-            raise NotFound(f"No messages found for {guild_id = }")
+            raise IndexError(f"No messages found for {guild_id = }")
 
-        return await self.fetch_message(*record["row"])
+        return MessageRecord.model_validate(dict(record))
 
-    async def get_closest_message(self, message: Message) -> Message:
+    async def get_closest_message_record(self, message: Message) -> MessageRecord:
         if message.guild is None:
-            raise NoGuild(f"No guild found for {message.id = }")
+            raise ValueError(f"No guild found for {message.id = }")
 
         embedding = await self.get_embedding(message)
 
         async with self.connect() as connection:
             record = await connection.fetchrow(
                 """
-                select (channel_id, message_id) from message
+                select * from message
                 where guild_id = $1
                 order by embedding <-> $2
                 limit 1
@@ -154,9 +188,9 @@ class QuothData:
             )
 
         if record is None:
-            raise NotFound(f"No messages found for {message.guild.id = }")
+            raise IndexError(f"No messages found for {message.guild.id = }")
 
-        return await self.fetch_message(*record["row"])
+        return MessageRecord.model_validate(dict(record))
 
     async def get_number_of_messages(self, guild_id: int) -> int:
         async with self.connect() as connection:

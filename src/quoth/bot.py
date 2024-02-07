@@ -6,11 +6,12 @@ from discord.abc import Messageable
 from discord.ext.commands import Bot
 
 from quoth.data import QuothData
-from quoth.errors import NoGuild, NotMessageable
 from quoth.utils.logging import get_logger
 from quoth.utils.message import embed_message
 
 LOGGER = get_logger(__name__)
+
+QuothCallback = Callable[[Message, Message, Message], Coroutine]
 
 
 class QuothBot(Bot):
@@ -19,8 +20,8 @@ class QuothBot(Bot):
         intents.members = True
         super().__init__(command_prefix, intents=intents)
 
-        self.data = QuothData(fetch_message=self.fetch_message)
-        self.callbacks: set[Callable[[Message, Message], Coroutine]] = set()
+        self.data = QuothData(model_name="BAAI/bge-small-en-v1.5")
+        self.callbacks: set[QuothCallback] = set()
 
     async def initialize(self) -> None:
         await self.data.initialize()
@@ -28,35 +29,32 @@ class QuothBot(Bot):
     async def fetch_message(self, channel_id: int, message_id: int) -> Message:
         channel = await self.fetch_channel(channel_id)
         if not isinstance(channel, Messageable):
-            raise NotMessageable(f"Channel {channel_id} is not messageable")
+            raise ValueError(f"{channel} is not messageable")
 
         return await channel.fetch_message(message_id)
 
-    def add_callbacks(
-        self, *callbacks: Callable[[Message, Message], Coroutine]
-    ) -> None:
-        self.callbacks.update(callbacks)
+    def add_callback(self, callback: QuothCallback) -> int:
+        self.callbacks.add(callback)
+        return hash(callback)
 
-    def remove_callbacks(
-        self, *callbacks: Callable[[Message, Message], Coroutine]
-    ) -> None:
-        self.callbacks.difference_update(callbacks)
+    def remove_callback(self, callback_id: int) -> QuothCallback:
+        for callback in self.callbacks:
+            if hash(callback) == callback_id:
+                self.callbacks.remove(callback)
+                return callback
 
-    async def quoth(
-        self,
-        origin: Message,
-        *filters: Callable[[Message], bool],
-    ) -> None:
+    async def quoth(self, origin: Message) -> None:
         if origin.guild is None:
-            raise NoGuild(f"Message {origin.id} is not in a guild")
+            raise ValueError(f"Message {origin.id} is not in a guild")
 
-        message = await self.data.get_random_message(origin.guild.id)
+        record = await self.data.get_random_message_record(origin.guild.id)
+        message = await self.fetch_message(record.channel_id, record.message_id)
         quoth = await origin.channel.send(embed=embed_message(message))
-        await gather(*[callback(message, quoth) for callback in self.callbacks])
+        await gather(*[callback(origin, message, quoth) for callback in self.callbacks])
 
     async def on_ready(self) -> None:
         await gather(*map(self.data.add_guild, self.guilds))
-        LOGGER.info("Finished initial download")
+        LOGGER.info("FINISHED DOWNLOAD")
 
     async def on_guild_join(self, guild: Guild) -> None:
         await self.data.add_guild(guild)
