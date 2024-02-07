@@ -1,5 +1,5 @@
 from asyncio import gather
-from typing import Callable, Coroutine
+from typing import Callable, Coroutine, Optional
 
 from discord import Guild, Intents, Message
 from discord.abc import Messageable
@@ -37,11 +37,12 @@ class QuothBot(Bot):
         self.callbacks.add(callback)
         return hash(callback)
 
-    def remove_callback(self, callback_id: int) -> QuothCallback:
+    def remove_callback(self, callback_id: int) -> Optional[QuothCallback]:
         for callback in self.callbacks:
             if hash(callback) == callback_id:
                 self.callbacks.remove(callback)
                 return callback
+        return None
 
     async def quoth(self, origin: Message) -> None:
         if origin.guild is None:

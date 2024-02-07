@@ -32,6 +32,9 @@ class MessageRecord(BaseModel):
     def from_message(
         cls, message: Message, embedding: Optional[NDArray] = None
     ) -> MessageRecord:
+        if message.guild is None:
+            raise ValueError(f"No guild found for {message.id = }")
+
         return cls(
             message_id=message.id,
             channel_id=message.channel.id,

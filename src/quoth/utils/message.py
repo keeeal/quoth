@@ -10,11 +10,13 @@ def get_content(message: Message) -> Optional[str]:
     for embed in message.embeds:
         if embed.description:
             return embed.description
+    return None
 
 
 def get_random_attachment(message: Message) -> Optional[Attachment]:
     if message.attachments:
         return choice(message.attachments)
+    return None
 
 
 def embed_message(message: Message) -> Embed:
