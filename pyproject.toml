@@ -8,9 +8,11 @@ dependencies = [
   "asyncpg",
   "discord.py",
   "pgvector",
+  "protobuf",
   "pydantic",
   "pyyaml",
   "sentence-transformers",
+  "sentencepiece",
 ]
 
 [project.optional-dependencies]

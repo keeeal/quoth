@@ -4,30 +4,25 @@ build:
 up:
 	docker compose up data bot
 
-test:
-	docker compose run dev pytest tests
+install-dev:
+	pip --no-cache-dir install --upgrade pip && \
+    pip --no-cache-dir install -r requirements-dev.txt
 
 format:
-	docker compose run dev sh -c \
-		"isort --profile black . && black ."
+	isort $(if $(check),--check,) --profile black src tests && \
+	black $(if $(check),--check,) src tests
 
-check-format:
-	docker compose run dev sh -c \
-		"isort --profile black --check . && black --check ."
+lint:
+	mypy --check-untyped-defs src tests
 
-check-types:
-	docker compose run dev mypy --check-untyped-defs .
+test:
+	pytest tests
 
-requirements:
-	docker compose run dev pip-compile \
-		--verbose \
-		--upgrade \
+lock:
+	pip-compile --verbose --upgrade \
 		--output-file requirements.txt \
 		pyproject.toml
-	docker compose run dev pip-compile \
-		--verbose \
-		--upgrade \
-		--extra dev \
+	pip-compile --verbose --upgrade --extra dev \
 		--output-file requirements-dev.txt \
 		pyproject.toml
 

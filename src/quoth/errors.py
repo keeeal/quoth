@@ -1,0 +1,2 @@
+class NotMessageable(Exception):
+    pass

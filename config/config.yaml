@@ -1,5 +1,7 @@
 bot:
-  command_prefix: '!'
+  command_prefix: /
+  # model_name: google/siglip2-base-patch16-256
+  model_name: BAAI/bge-small-en-v1.5
 quoth:
   emoji: 🐦
 react:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from os import getenv
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel
 from yaml import safe_dump, safe_load
@@ -10,6 +9,7 @@ from yaml import safe_dump, safe_load
 
 class BotConfig(BaseModel):
     command_prefix: str = "!"
+    model_name: str = "choose-your-model"
 
 
 class QuothConfig(BaseModel):
@@ -22,8 +22,8 @@ class ReactConfig(BaseModel):
 
 class Config(BaseModel):
     bot: BotConfig = BotConfig()
-    quoth: Optional[QuothConfig] = QuothConfig()
-    react: Optional[ReactConfig] = ReactConfig()
+    quoth: QuothConfig | None = QuothConfig()
+    react: ReactConfig | None = ReactConfig()
 
     @classmethod
     def from_yaml(cls, file: Path, create_if_not_found: bool = False) -> Config:
@@ -39,7 +39,7 @@ class Config(BaseModel):
         raise FileNotFoundError(str(file))
 
 
-def read_from_env_var(key: str, is_file: Optional[bool] = None) -> str:
+def read_from_env_var(key: str, is_file: bool | None = None) -> str:
     if not (value := getenv(key)):
         raise ValueError(f"The env var '{key}' is not set")
 

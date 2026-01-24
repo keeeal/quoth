@@ -1,11 +1,12 @@
 import logging
+from contextlib import contextmanager
 from logging import Formatter, Logger, StreamHandler
-from typing import Optional
+from time import time
 
 from discord.utils import _ColourFormatter, stream_supports_colour
 
 
-def get_logger(name: Optional[str] = None) -> Logger:
+def get_logger(name: str | None = None) -> Logger:
     logger = logging.getLogger(name)
     handler = StreamHandler()
     formatter: Formatter
@@ -23,3 +24,18 @@ def get_logger(name: Optional[str] = None) -> Logger:
     logger.setLevel(logging.INFO)
 
     return logger
+
+
+@contextmanager
+def log_time(logger: Logger, message: str):
+    """
+    Context manager to log the time taken for a block of code to execute.
+
+    Args:
+        logger (Logger): The logger to use for logging the elapsed time.
+        message (str): The message to log with the elapsed time.
+    """
+    start_time = time()
+    yield
+    elapsed_time = time() - start_time
+    logger.info(f"{message} took {elapsed_time:.2f} seconds")
