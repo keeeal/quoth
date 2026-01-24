@@ -1,2 +1,0 @@
-class NotMessageable(Exception):
-    pass

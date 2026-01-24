@@ -7,12 +7,10 @@ requires-python = ">=3.11"
 dependencies = [
   "asyncpg",
   "discord.py",
-  "pgvector",
-  "protobuf",
   "pydantic",
   "pyyaml",
-  "sentence-transformers",
-  "sentencepiece",
+  "requests",
+  "termplotlib",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +21,7 @@ dev = [
   "pip-tools",
   "pytest",
   "types-pyyaml",
+  "types-requests",
 ]
 
 [build-system]

@@ -1,8 +1,12 @@
 bot:
   command_prefix: /
-  # model_name: google/siglip2-base-patch16-256
-  model_name: BAAI/bge-small-en-v1.5
 quoth:
   emoji: 🐦
+  cooldown_seconds: 60
 react:
   emoji: 🤔
+  trigger_word: quoth
+repost:
+  cooldown_seconds: 3600
+  min_content_chars: 5
+  min_occurances: 2

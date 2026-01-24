@@ -9,12 +9,8 @@ from asyncpg import Connection, Pool, create_pool  # type: ignore[import-untyped
 from discord import Guild, Message, MessageType
 from discord.abc import Messageable
 from discord.errors import Forbidden
-from numpy.typing import NDArray
-from pgvector.asyncpg import register_vector  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
-from torch import Tensor
 
-from quoth.model import QuothModel
 from quoth.utils.config import read_from_env_var
 from quoth.utils.logging import get_logger
 from quoth.utils.message import get_content
@@ -40,20 +36,16 @@ class ConnectionPriority(Enum):
 
 
 class MessageRecord(BaseModel):
-    class Config:
-        arbitrary_types_allowed = True
-
     message_id: int = Field(pg_type="bigint primary key")  # type: ignore
     channel_id: int = Field(pg_type="bigint not null")  # type: ignore
     guild_id: int | None = Field(pg_type="bigint")  # type: ignore
+    author_id: int = Field(pg_type="bigint not null")  # type: ignore
     content: str | None = Field(pg_type="text")  # type: ignore
     attachment_urls: list[str] = Field(pg_type="text[] not null")  # type: ignore
     created_at: datetime = Field(pg_type="timestamptz not null")  # type: ignore
     display_name: str = Field(pg_type="text not null")  # type: ignore
     avatar_url: str | None = Field(pg_type="text")  # type: ignore
     jump_url: str = Field(pg_type="text not null")  # type: ignore
-    embedding: NDArray | None = Field(pg_type="vector({ndim})")  # type: ignore
-    channel_ingest: bool = Field(pg_type="boolean not null")  # type: ignore
 
     @classmethod
     def field_types(cls) -> dict[str, str]:
@@ -72,40 +64,30 @@ class MessageRecord(BaseModel):
         return field_types
 
     @classmethod
-    def from_message(
-        cls,
-        message: Message,
-        embedding: NDArray | None = None,
-        channel_ingest: bool = False,
-    ) -> Self:
+    def from_message(cls, message: Message) -> Self:
         author = message.author
         return cls(
             message_id=message.id,
             channel_id=message.channel.id,
             guild_id=message.guild.id if message.guild else None,
+            author_id=author.id,
             content=get_content(message),
             attachment_urls=[attachment.url for attachment in message.attachments],
             created_at=message.created_at,
             display_name=author.display_name,
             avatar_url=author.avatar.url if author.avatar else None,
             jump_url=message.jump_url,
-            embedding=embedding,
-            channel_ingest=channel_ingest,
         )
 
 
 class QuothData:
     def __init__(
         self,
-        model: QuothModel,
         max_connections_per_priority: dict[ConnectionPriority, int] = {
             ConnectionPriority.high: 2,
             ConnectionPriority.low: 4,
         },
     ) -> None:
-        self.model = model
-        self.ndim: int = self.model.get_embedding_dimension()
-
         self.connection_kwargs = dict(
             host="data",
             user="postgres",
@@ -134,8 +116,6 @@ class QuothData:
             raise ValueError("Connection pool is not initialized")
 
         async with pool.acquire() as connection:
-            await connection.execute("create extension if not exists vector")
-            await register_vector(connection)
             yield connection
 
     async def initialize(
@@ -154,7 +134,7 @@ class QuothData:
         query = f"""
             create table if not exists message (
                 {", ".join(
-                    f"{field} {pg_type.format(ndim=self.ndim)}"
+                    f"{field} {pg_type}"
                     for field, pg_type in MessageRecord.field_types().items()
                 )}
             )
@@ -164,6 +144,7 @@ class QuothData:
 
     async def exists(
         self,
+        *,
         message_id: int | None = None,
         channel_id: int | None = None,
         guild_id: int | None = None,
@@ -180,20 +161,6 @@ class QuothData:
         """
         async with self.connect(priority) as connection:
             return await connection.fetchval(query, message_id, channel_id, guild_id)
-
-    async def count(
-        self,
-        channel_id: int | None = None,
-        guild_id: int | None = None,
-        priority: ConnectionPriority = ConnectionPriority.minimum(),
-    ) -> int:
-        query = """
-            select count(1) from message
-            where (channel_id = $1 or $1 is null)
-            and (guild_id = $2 or $2 is null)
-        """
-        async with self.connect(priority) as connection:
-            return await connection.fetchval(query, channel_id, guild_id)
 
     async def add_record(
         self,
@@ -212,7 +179,6 @@ class QuothData:
     async def add_message(
         self,
         message: Message,
-        channel_ingest: bool = False,
         priority: ConnectionPriority = ConnectionPriority.minimum(),
     ) -> None:
         if message.author.bot:
@@ -222,9 +188,8 @@ class QuothData:
         if await self.exists(message_id=message.id, priority=priority):
             return
 
-        embedding = await self.get_embedding(message, priority=priority)
         await self.add_record(
-            MessageRecord.from_message(message, embedding, channel_ingest),
+            MessageRecord.from_message(message),
             priority=priority,
         )
 
@@ -233,13 +198,9 @@ class QuothData:
         channel: Messageable,
         priority: ConnectionPriority = ConnectionPriority.minimum(),
     ) -> None:
-        channel_id = (await channel._get_channel()).id
-        after = await self.get_latest_ingest(channel_id)
         try:
-            async for message in channel.history(
-                after=after, limit=None, oldest_first=True
-            ):
-                await self.add_message(message, channel_ingest=True, priority=priority)
+            async for message in channel.history(limit=None, oldest_first=True):
+                await self.add_message(message, priority=priority)
         except Forbidden:
             LOGGER.warning(f"Channel forbidden: {channel}")
         else:
@@ -257,102 +218,77 @@ class QuothData:
         )
         LOGGER.info(f"Added guild: {guild}")
 
-    async def get_record(
+    async def fetch_record(
         self,
         message_id: int,
-        channel_id: int | None = None,
         priority: ConnectionPriority = ConnectionPriority.minimum(),
     ) -> MessageRecord | None:
         query = """
             select * from message
             where message_id = $1
-            and (channel_id = $2 or $2 is null)
             limit 1
         """
         async with self.connect(priority) as connection:
-            record = await connection.fetchrow(query, message_id, channel_id)
+            record = await connection.fetchrow(query, message_id)
 
         if record is None:
             return None
 
         return MessageRecord.model_validate(dict(record))
 
-    async def get_embedding(
+    async def fetch_records(
         self,
-        message: Message,
+        *,
+        channel_id: int | None = None,
+        guild_id: int | None = None,
+        author_id: int | None = None,
+        content: str | None = None,
         priority: ConnectionPriority = ConnectionPriority.minimum(),
-    ) -> NDArray | None:
+    ) -> list[MessageRecord]:
         query = """
-            select embedding from message
-            where message_id = $1
-            limit 1
-        """
-        embedding: Tensor | NDArray | None = None
-        async with self.connect(priority) as connection:
-            embedding = await connection.fetchval(query, message.id)
-        if embedding is None and (content := get_content(message)):
-            embedding = self.model.embed_text(content)
-        if isinstance(embedding, Tensor):
-            embedding = embedding.numpy()
-
-        return embedding
-
-    async def get_latest_ingest(
-        self,
-        channel_id: int,
-        priority: ConnectionPriority = ConnectionPriority.minimum(),
-    ) -> datetime | None:
-        query = """
-            select created_at from message
-            where channel_id = $1 and channel_ingest = true
-            order by created_at desc
-            limit 1
+            select * from message
+            where (channel_id = $1 or $1 is null)
+            and (guild_id = $2 or $2 is null)
+            and (author_id = $3 or $3 is null)
+            and (lower(content) = lower($4) or $4 is null)
         """
         async with self.connect(priority) as connection:
-            return await connection.fetchval(query, channel_id)
+            records = await connection.fetch(
+                query, channel_id, guild_id, author_id, content
+            )
 
-    async def get_random(
+        return [MessageRecord.model_validate(dict(record)) for record in records]
+
+    async def fetch_random(
         self,
-        guild_id: int,
+        *,
+        channel_id: int | None = None,
+        guild_id: int | None = None,
+        author_id: int | None = None,
+        content: str | None = None,
         priority: ConnectionPriority = ConnectionPriority.minimum(),
     ) -> MessageRecord:
         query = """
             select * from message
-            where guild_id = $1
+            where (channel_id = $1 or $1 is null)
+            and (guild_id = $2 or $2 is null)
+            and (author_id = $3 or $3 is null)
+            and (content = $4 or $4 is null)
             order by random()
             limit 1
         """
         async with self.connect(priority) as connection:
-            record = await connection.fetchrow(query, guild_id)
-
-        if record is None:
-            raise IndexError(f"No messages found for {guild_id = }")
-
-        return MessageRecord.model_validate(dict(record))
-
-    async def get_closest(
-        self,
-        message: Message,
-        priority: ConnectionPriority = ConnectionPriority.minimum(),
-    ) -> MessageRecord:
-        if message.guild is None:
-            raise ValueError(f"No guild found for {message.id = }")
-
-        embedding = await self.get_embedding(message, priority=priority)
-
-        async with self.connect(priority) as connection:
             record = await connection.fetchrow(
-                """
-                select * from message
-                where guild_id = $1
-                order by embedding <-> $2
-                limit 1
-                """,
-                message.guild.id,
-                embedding,
+                query, channel_id, guild_id, author_id, content
             )
 
         if record is None:
-            raise IndexError(f"No messages found for {message.guild.id = }")
+            raise IndexError(
+                "No messages found for"
+                f" {channel_id=}"
+                f" {guild_id=}"
+                f" {author_id=}"
+                f" {content=}"
+            )
 
         return MessageRecord.model_validate(dict(record))

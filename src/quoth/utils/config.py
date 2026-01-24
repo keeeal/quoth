@@ -8,40 +8,42 @@ from yaml import safe_dump, safe_load
 
 
 class BotConfig(BaseModel):
-    command_prefix: str = "!"
-    model_name: str = "choose-your-model"
+    command_prefix: str
 
 
 class QuothConfig(BaseModel):
-    emoji: str = "🐦"
+    emoji: str
+    cooldown_seconds: float
 
 
 class ReactConfig(BaseModel):
-    emoji: str = "🤔"
+    emoji: str
+    trigger_word: str
+
+
+class RepostConfig(BaseModel):
+    cooldown_seconds: float
+    min_content_chars: int
+    min_occurances: int
 
 
 class Config(BaseModel):
-    bot: BotConfig = BotConfig()
-    quoth: QuothConfig | None = QuothConfig()
-    react: ReactConfig | None = ReactConfig()
+    bot: BotConfig
+    quoth: QuothConfig | None = None
+    react: ReactConfig | None = None
+    repost: RepostConfig | None = None
 
     @classmethod
-    def from_yaml(cls, file: Path, create_if_not_found: bool = False) -> Config:
-        if file.is_file():
-            with open(file) as f:
-                return Config(**safe_load(f))
-        elif create_if_not_found:
-            config = cls()
-            with open(file, "w") as f:
-                safe_dump(config.model_dump(), f, allow_unicode=True, sort_keys=False)
-            return config
-
-        raise FileNotFoundError(str(file))
+    def from_yaml(cls, file: Path) -> Config:
+        if not file.is_file():
+            raise FileNotFoundError(file)
+        with open(file) as f:
+            return Config.model_validate(safe_load(f))
 
 
 def read_from_env_var(key: str, is_file: bool | None = None) -> str:
     if not (value := getenv(key)):
-        raise ValueError(f"The env var '{key}' is not set")
+        raise KeyError(f"The env var '{key}' is not set")
 
     if is_file or (is_file is None and key.lower().endswith("_file")):
         with open(value) as f:

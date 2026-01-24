@@ -16,11 +16,10 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     secrets:
        - discord_token
-       - huggingface_token
        - postgres_password
 
   data:
-    image: ankane/pgvector:latest
+    image: postgres:latest
     volumes:
       - ./data:/app/data
     environment:
@@ -38,7 +37,5 @@ services:
 secrets:
   discord_token:
     file: secrets/discord_token
-  huggingface_token:
-    file: secrets/huggingface_token
   postgres_password:
     file: secrets/postgres_password

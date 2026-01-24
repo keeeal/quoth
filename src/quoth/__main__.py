@@ -3,9 +3,9 @@ from asyncio import new_event_loop
 from pathlib import Path
 
 from quoth.bot import QuothBot
-from quoth.ext import Commands, Quoth, React
+from quoth.ext import Commands, Quoth, React, Repost
 from quoth.utils.config import Config, read_from_env_var
-from quoth.utils.logging import get_logger
+from quoth.utils.logging import get_logger, log_time
 
 LOGGER = get_logger(__name__)
 
@@ -17,16 +17,24 @@ def main(config_file: Path) -> None:
         LOGGER.error(error)
         return
 
-    config = Config.from_yaml(config_file, create_if_not_found=True)
+    config = Config.from_yaml(config_file)
     bot = QuothBot(**config.bot.model_dump())
     loop = new_event_loop()
 
-    LOGGER.info("Adding cogs to bot")
-    loop.run_until_complete(bot.add_cog(Commands(bot)))
-    if config.quoth:
-        loop.run_until_complete(bot.add_cog(Quoth(bot, **config.quoth.model_dump())))
-    if config.react:
-        loop.run_until_complete(bot.add_cog(React(bot, **config.react.model_dump())))
+    with log_time(LOGGER, "Adding cogs to bot"):
+        loop.run_until_complete(bot.add_cog(Commands(bot)))
+        if config.quoth:
+            loop.run_until_complete(
+                bot.add_cog(Quoth(bot, **config.quoth.model_dump()))
+            )
+        if config.react:
+            loop.run_until_complete(
+                bot.add_cog(React(bot, **config.react.model_dump()))
+            )
+        if config.repost:
+            loop.run_until_complete(
+                bot.add_cog(Repost(bot, **config.repost.model_dump()))
+            )
 
     LOGGER.info("Starting main loop")
     loop.run_until_complete(bot.initialize())

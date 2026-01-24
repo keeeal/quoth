@@ -1,30 +1,15 @@
 from asyncio import gather
-from functools import partial
 from random import choice, random
-from typing import Callable, Coroutine
 
-from discord import Embed, Guild, Intents, Message
+from discord import Embed, Forbidden, Guild, Intents, Message, NotFound
 from discord.abc import Messageable
 from discord.ext.commands import Bot
+from requests import Response
 
 from quoth.data import ConnectionPriority, MessageRecord, QuothData
-from quoth.errors import NotMessageable
-from quoth.model import SentenceTransformerModel
-from quoth.utils.logging import get_logger
+from quoth.utils.logging import get_logger, log_time
 
 LOGGER = get_logger(__name__)
-
-# Type alias for an async callback to be called when a quoth is created.
-#
-# Args:
-#   1. (MessageRecord): The original message that triggered the quoth.
-#   2. (MessageRecord): The message record that was selected to be quoted.
-#   3. (Message): The message that was sent as the quoth.
-#
-# Returns:
-#   Coroutine: A coroutine to be awaited.
-#
-QuothCallback = Callable[[MessageRecord, MessageRecord, Message], Coroutine]
 
 
 def embed_record(record: MessageRecord) -> Embed:
@@ -56,66 +41,69 @@ def embed_record(record: MessageRecord) -> Embed:
 
 
 class QuothBot(Bot):
-    def __init__(self, command_prefix: str, model_name: str) -> None:
+    def __init__(self, command_prefix: str) -> None:
         intents = Intents.default()
         intents.members = True
         intents.message_content = True
         super().__init__(command_prefix, intents=intents)
 
-        self.model = SentenceTransformerModel(model_name)
-        self.data = QuothData(model=self.model)
-        self.callbacks: dict[int, QuothCallback] = {}
+        self.data = QuothData()
 
     async def initialize(self) -> None:
-        LOGGER.info("Initializing bot")
-        await self.data.initialize(priority=ConnectionPriority.high)
+        with log_time(LOGGER, "Initializing bot"):
+            await self.data.initialize(priority=ConnectionPriority.high)
 
-    def get_messageable(self, channel_id: int) -> Messageable:
-        channel = self.get_channel(channel_id)
-        if not isinstance(channel, Messageable):
-            raise NotMessageable(channel)
-        return channel
+    async def fetch_message(
+        self,
+        message_id: int,
+        channel_id: int | None = None,
+    ) -> Message:
+        if channel_id is not None:
+            messageable = self.get_partial_messageable(channel_id)
+            return await messageable.fetch_message(message_id)
 
-    async def get_record(self, message_id: int, channel_id: int) -> MessageRecord:
-        record = await self.data.get_record(
-            message_id, channel_id, priority=ConnectionPriority.high
+        for channel in self.get_all_channels():
+            if not isinstance(channel, Messageable):
+                continue
+            try:
+                return await channel.fetch_message(message_id)
+            except (Forbidden, NotFound):
+                continue
+
+        raise NotFound(Response(), f"Message {message_id} not found")
+
+    async def fetch_record(
+        self,
+        message_id: int,
+        channel_id: int | None = None,
+    ) -> MessageRecord:
+        record = await self.data.fetch_record(
+            message_id,
+            priority=ConnectionPriority.high,
         )
         if record is not None:
             return record
 
         LOGGER.warning(f"Cache miss for {message_id=}")
-        channel = self.get_messageable(channel_id)
-        message = await channel.fetch_message(message_id)
+        message = await self.fetch_message(message_id, channel_id)
         return MessageRecord.from_message(message)
-
-    def add_callback(self, callback: QuothCallback) -> int:
-        callback_id = hash(callback)
-        self.callbacks[callback_id] = callback
-        return callback_id
-
-    def pop_callback(self, callback_id: int) -> QuothCallback | None:
-        return self.callbacks.pop(callback_id, None)
 
     async def quoth(self, origin: MessageRecord) -> None:
         if origin.guild_id is None:
             raise ValueError(f"Message {origin.message_id} is not in a guild")
 
-        record = await self.data.get_random(
-            origin.guild_id,
+        record = await self.data.fetch_random(
+            guild_id=origin.guild_id,
             priority=ConnectionPriority.high,
         )
-        channel = self.get_messageable(origin.channel_id)
-        quoth = await channel.send(embed=embed_record(record))
-        await gather(
-            *[callback(origin, record, quoth) for callback in self.callbacks.values()]
-        )
+        messageable = self.get_partial_messageable(origin.channel_id)
+        await messageable.send(embed=embed_record(record))
 
     async def on_ready(self) -> None:
         LOGGER.info(f"Logged in as {self.user}")
         await self.tree.sync()
-        _add_guild = partial(self.data.add_guild, priority=ConnectionPriority.low)
-        await gather(*map(_add_guild, self.guilds))
-        LOGGER.info("FINISHED DOWNLOAD")
+        with log_time(LOGGER, "Downloading data"):
+            await gather(*map(self.data.add_guild, self.guilds))
 
     async def on_guild_join(self, guild: Guild) -> None:
         await self.data.add_guild(guild, priority=ConnectionPriority.low)

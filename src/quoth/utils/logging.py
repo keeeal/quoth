@@ -35,6 +35,7 @@ def log_time(logger: Logger, message: str):
         logger (Logger): The logger to use for logging the elapsed time.
         message (str): The message to log with the elapsed time.
     """
+    logger.info(f"{message}...")
     start_time = time()
     yield
     elapsed_time = time() - start_time
