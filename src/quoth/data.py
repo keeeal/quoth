@@ -250,8 +250,9 @@ class QuothData:
             where (channel_id = $1 or $1 is null)
             and (guild_id = $2 or $2 is null)
             and (author_id = $3 or $3 is null)
-            and (lower(content) = lower($4) or $4 is null)
+            and (content ilike $4 or $4 is null)
         """
+        content = None if content is None else f"%{content}%"
         async with self.connect(priority) as connection:
             records = await connection.fetch(
                 query, channel_id, guild_id, author_id, content
@@ -273,7 +274,7 @@ class QuothData:
             where (channel_id = $1 or $1 is null)
             and (guild_id = $2 or $2 is null)
             and (author_id = $3 or $3 is null)
-            and (content = $4 or $4 is null)
+            and (content ilike $4 or $4 is null)
             order by random()
             limit 1
         """

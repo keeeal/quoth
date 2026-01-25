@@ -14,9 +14,9 @@ LOGGER = get_logger(__name__)
 
 
 DESCRIPTION = Template("""
-Sent ${num_reposts} times before!
-First sent: [${first_date}](${first_url}) by ${first_user}
-Last sent: [${last_date}](${last_url}) by ${last_user}
+Said ${num_reposts} times before!
+First said: [${first_date}](${first_url}) by ${first_user}
+Last said: [${last_date}](${last_url}) by ${last_user}
 """)
 
 
